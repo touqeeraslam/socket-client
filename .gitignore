@@ -1,0 +1,20 @@
+# dependencies
+node_modules
+
+# log
+*.log
+
+# misc
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.idea/
+*.iml
+*target/
+
+*.vagga/
+*.home/
+**/package-lock.json
+**/dist/
+.gitlab-ci.yml
