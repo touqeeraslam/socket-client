@@ -1,31 +1,12 @@
+import { inject, multiInject, optional } from 'inversify';
 import { Message, MessageType, ResponseEntity, ChannelType, WsRequest, WsResponse } from '@app/socket-types';
 import { Observable, throwError, Subject, Subscription, interval, NEVER } from 'rxjs';
 import { filter, map, first, timeoutWith, takeWhile, startWith, switchMap, catchError } from 'rxjs/operators';
-import { breaker } from './breaker';
-import { response } from './response';
-import { awaitInterval } from './awaitInterval';
-
-export type SocketConfig = {
-    url: string;
-    protocols?: string | string[];
-    requestTimeout?: number;
-    pingTimeout?: number;
-    pingInterval?: number;
-    reconnectInterval?: number;
-    reconnectAttempts?: number;
-    serializer?: (value: Message) => string;
-    deserializer?: (e: MessageEvent) => WsResponse<Message>;
-};
-
-const defaultConfig = {
-    requestTimeout: Infinity,
-    pingTimeout: 5000,
-    pingInterval: 10000,
-    reconnectInterval: 5000,
-    reconnectAttempts: 10,
-    deserializer: (e: MessageEvent) => JSON.parse(e.data),
-    serializer: (value: any) => JSON.stringify(value)
-};
+import { breaker } from './operators/breaker';
+import { response } from './operators/response';
+import { awaitInterval } from './operators/awaitInterval';
+import { SocketConfig, defaultConfig, DISocketConfig } from './SocketConfig';
+import { ISocketInterceptor, DISocketInterceptor } from './SocketInterceptor';
 
 type QueryOptions = {
     channel?: ChannelType;
@@ -44,19 +25,43 @@ export class Socket {
 
     private request: Subject<WsRequest>;
 
+    private requestInput: Subject<WsRequest>;
+
     private response: Subject<WsResponse>;
+
+    private responseInput: Subject<WsResponse>;
 
     private error: Subject<Error>;
 
     private reconnectSubscription: Subscription;
 
-    constructor(config: SocketConfig) {
+    private pendingRequests: Map<string, WsRequest>;
+
+    constructor(
+        @inject(DISocketConfig) config: SocketConfig,
+        @multiInject(DISocketInterceptor) @optional() interceptors: ISocketInterceptor[]
+    ) {
         this.config = { ...defaultConfig, ...config };
 
         this.open = new Subject();
-        this.response = new Subject();
-        this.request = new Subject();
         this.error = new Subject();
+        this.request = new Subject<WsRequest>();
+        this.response = new Subject<WsResponse>();
+        this.pendingRequests = new Map();
+
+        const { request, response } = (interceptors || []).reduceRight((next, interceptor) => {
+            return interceptor.intercept({
+                request: next.request,
+                response: next.response,
+                open: this.open,
+                error: this.error,
+                pendingRequests: this.pendingRequests,
+                socket: this
+            });
+        }, { request: this.request, response: this.response });
+
+        this.requestInput = request;
+        this.responseInput = response;
 
         this.init();
         this.connect();
@@ -69,12 +74,18 @@ export class Socket {
             .pipe(
                 breaker(this.open)
             )
-            .subscribe((value: any) => {
+            .subscribe((value: WsRequest<Message>) => {
                 try {
                     this.ws.send(serializer(value));
+                    this.pendingRequests.set(value.data.headers.id, value);
                 } catch (e) {
                     this.error.next(e);
                 }
+            });
+
+        this.response
+            .subscribe(item => {
+                this.pendingRequests.delete(item.data.headers.id);
             });
 
         this.open
@@ -107,7 +118,7 @@ export class Socket {
 
         this.ws.onmessage = (message: MessageEvent) => {
             try {
-                this.response.next(deserializer(message));
+                this.responseInput.next(deserializer(message));
             } catch (e) {
                 this.error.next(e);
             }
@@ -163,7 +174,7 @@ export class Socket {
     }
 
     send<T>(value: WsRequest<T>) {
-        this.request.next(value);
+        this.requestInput.next(value);
     }
 
     getChannel<T>(channel: ChannelType): Observable<Message<ResponseEntity<T>>> {
@@ -189,14 +200,12 @@ export class Socket {
             );
     }
 
-    async query<T, D = any>(code: string, data: D = null, queryOptions?: QueryOptions): Promise<T> {
+    async sendMessage<T>(message: Message, queryOptions?: QueryOptions): Promise<T> {
         const options = {
             channel: ChannelType.MESSAGE,
             requestTimeout: this.config.requestTimeout,
             ...queryOptions
         };
-
-        const message = new Message(MessageType.REQUEST, code, data);
 
         this.send({
             event: options.channel,
@@ -220,6 +229,11 @@ export class Socket {
         return source.toPromise();
     }
 
+    async query<T, D = any>(code: string, data: D = null): Promise<T> {
+        const message = new Message(MessageType.REQUEST, code, data);
+        return this.sendMessage(message);
+    }
+
     getError(): Observable<Error> {
         return this.error.asObservable();
     }
@@ -230,7 +244,8 @@ export class Socket {
 
     private async pingQuery(): Promise<boolean> {
         try {
-            await this.query('', null, {
+            const message = new Message(MessageType.REQUEST, null, null);
+            await this.sendMessage(message, {
                 channel: ChannelType.PING,
                 requestTimeout: this.config.pingTimeout
             });

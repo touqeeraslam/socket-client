@@ -1,6 +1,3 @@
-import { Socket, SocketConfig } from './Socket';
-
-export {
-    Socket,
-    SocketConfig
-}
+export * from './Socket';
+export * from './SocketConfig';
+export * from './SocketInterceptor';
