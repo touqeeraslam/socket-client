@@ -123,10 +123,10 @@ export class Socket {
                 if(msg.data){
                     console.log('msg has data ?????????',msg.data)
                     if(msg.data.body['data']){
-                        console.log('msg has data in body ?????????')
+                        console.log('msg has data in body ?????????', msg.data['code'])
 
-                    if(msg.data['code']=== "GET_BLOCKS"){
-                        console.log('messege sending for blocks');
+                    if(msg.data['code']=== "GET_BLOCKS" || msg.data['code']=="GET_DELEGATES" || msg.data['code']=="GET_TRANSACTIONS"){
+                        console.log('messege sending for', msg.data['code'] );
                     this.responseInput.next(msg);
                 }    
                     }
@@ -237,11 +237,13 @@ export class Socket {
                 timeoutWith(options.requestTimeout, throwError(['Request Timeout error']))
             );
         }
-
+            debugger
         return source.toPromise();
     }
 
     async query<T, D = any>(code: string, data: D = null): Promise<Message<ResponseEntity<T>>> {
+        console.log("on query ", data);
+        
         const message = new Message(MessageType.REQUEST, code, data);
         return this.sendMessage(message);
     }
