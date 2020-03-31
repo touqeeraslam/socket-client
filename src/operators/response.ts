@@ -8,11 +8,10 @@ type Filter<T> = {
 
 export const response = <T>(filterFn: Filter<T>) => (source: Observable<Message<ResponseEntity<T>>>) =>
     source.pipe(
-        filter(filterFn),
         switchMap(item => {
             if (item && item.body) {
                 return item.body.success
-                    ? of(item.body.data)
+                    ? of(item)
                     : throwError(item.body.errors);
             }
             return throwError(['Response not valid']);

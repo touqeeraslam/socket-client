@@ -118,7 +118,19 @@ export class Socket {
 
         this.ws.onmessage = (message: MessageEvent) => {
             try {
-                this.responseInput.next(deserializer(message));
+                // this.responseInput.next(deserializer(message));
+                var msg = deserializer(message);
+                if(msg.data){
+                    console.log('msg has data ?????????',msg.data)
+                    if(msg.data.body['data']){
+                        console.log('msg has data in body ?????????')
+
+                    if(msg.data['code']=== "GET_BLOCKS"){
+                        console.log('messege sending for blocks');
+                    this.responseInput.next(msg);
+                }    
+                    }
+                }
             } catch (e) {
                 this.error.next(e);
             }
@@ -185,14 +197,14 @@ export class Socket {
             );
     }
 
-    getEvent<T>(code: string): Observable<T> {
+    getEvent<T>(code: string): Observable<Message<ResponseEntity<T>>> {
         return this.getChannel<T>(ChannelType.MESSAGE)
             .pipe(
                 response(item => item.code === code),
             );
     }
 
-    getEventById<T>(id: string, channel: ChannelType = ChannelType.MESSAGE): Observable<T> {
+    getEventById<T>(id: string, channel: ChannelType = ChannelType.MESSAGE): Observable<Message<ResponseEntity<T>>> {
         return this.getChannel<T>(channel)
             .pipe(
                 response(item => item.headers.id === id),
@@ -200,7 +212,7 @@ export class Socket {
             );
     }
 
-    async sendMessage<T>(message: Message, queryOptions?: QueryOptions): Promise<T> {
+    async sendMessage<T>(message: Message, queryOptions?: QueryOptions): Promise<Message<ResponseEntity<T>>> {
         const options = {
             channel: ChannelType.MESSAGE,
             requestTimeout: this.config.requestTimeout,
@@ -229,7 +241,7 @@ export class Socket {
         return source.toPromise();
     }
 
-    async query<T, D = any>(code: string, data: D = null): Promise<T> {
+    async query<T, D = any>(code: string, data: D = null): Promise<Message<ResponseEntity<T>>> {
         const message = new Message(MessageType.REQUEST, code, data);
         return this.sendMessage(message);
     }
